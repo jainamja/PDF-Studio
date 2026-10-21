@@ -1,6 +1,6 @@
 {
   "name": "pdf-studio",
-  "homepage": "https://jainamja.github.io/PDF-Studio",
+  "homepage": "https://pdf-topaz-chi.vercel.app",
   "version": "1.0.0",
   "description": "PDF Studio - Professional Desktop PDF Editor",
   "main": "electron/main.cjs",

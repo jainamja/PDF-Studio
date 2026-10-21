@@ -2,6 +2,9 @@
 
 **PDF Studio** is an original desktop PDF editor built with Electron, React 18, Vite, and pure PDF manipulation engines. It features a dark theme, ribbon-style navigation, and non-destructive overlay architecture.
 
+🌐 **Live Web App on Vercel**: [https://pdf-topaz-chi.vercel.app](https://pdf-topaz-chi.vercel.app)  
+📦 **GitHub Repository**: [https://github.com/jainamja/PDF-Studio](https://github.com/jainamja/PDF-Studio)
+
 ---
 
 ## Tech Stack
