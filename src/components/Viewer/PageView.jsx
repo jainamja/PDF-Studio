@@ -7,7 +7,14 @@ import FormOverlay from './FormOverlay';
 const MAX_CANVAS_PIXELS = 8_000_000; // 8M px mobile safety limit
 
 export default function PageView({ pageIndex, docId, scale }) {
-  const { activeDoc, activeTool, setActiveTool, addAnnotation } = useDocument();
+  const {
+    activeDoc,
+    activeTool,
+    setActiveTool,
+    addAnnotation,
+    setSelectedTextRange,
+    setSelectedAnnotationId
+  } = useDocument();
 
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -121,10 +128,22 @@ export default function PageView({ pageIndex, docId, scale }) {
   }, [pdfPage, viewport, shouldBeActive]);
 
   // Text selection handler
-  const handleTextSelect = ({ text, x, y, width, height }) => {
+  const handleTextSelect = ({ text, x, y, width, height, clientX, clientY }) => {
     if (!text || text.trim() === '') return;
 
-    if (['highlight', 'underline', 'strikethrough'].includes(activeTool)) {
+    if (activeTool === 'select') {
+      setSelectedTextRange({
+        pageIndex,
+        text: text.trim(),
+        x,
+        y,
+        width,
+        height,
+        clientX,
+        clientY
+      });
+      setSelectedAnnotationId(null);
+    } else if (['highlight', 'underline', 'strikethrough'].includes(activeTool)) {
       addAnnotation({
         pageIndex,
         type: activeTool,
@@ -135,6 +154,7 @@ export default function PageView({ pageIndex, docId, scale }) {
         color: activeTool === 'highlight' ? '#fef08a' : '#ef4444'
       });
       setActiveTool('select');
+      setSelectedTextRange(null);
     } else if (activeTool === 'edit-text') {
       addAnnotation({
         pageIndex,
@@ -149,6 +169,7 @@ export default function PageView({ pageIndex, docId, scale }) {
         color: '#000000'
       });
       setActiveTool('select');
+      setSelectedTextRange(null);
     }
   };
 

@@ -105,6 +105,9 @@ export function DocumentProvider({ children }) {
   // Selected annotation ID for moving, resizing, properties editing
   const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
 
+  // Selected text on page for floating actions and deletion
+  const [selectedTextRange, setSelectedTextRange] = useState(null);
+
   // Modals & Panels
   const [activeModal, setActiveModal] = useState(null); // 'watermark', 'header-footer', 'crop', 'metadata', 'compress', 'ocr', 'split', 'merge', 'signature', 'images-to-pdf', 'unsaved-prompt', 'scan-to-pdf', 'large-file-warning'
   const [modalProps, setModalProps] = useState({});
@@ -470,23 +473,25 @@ export function DocumentProvider({ children }) {
 
   /**
    * Updates an annotation.
+   * If commitHistory is false (e.g. during live dragging or text typing), updates state directly
+   * without creating full history memory clones.
    */
-  const updateAnnotation = useCallback((id, updates) => {
+  const updateAnnotation = useCallback((id, updates, commitHistory = true) => {
     if (!activeDoc) return;
 
     setDocuments(prev => prev.map(d => {
       if (d.id !== activeDocId) return d;
       const nextAnnots = d.annotations.map(a => a.id === id ? { ...a, ...updates } : a);
-      const nextSnapshot = {
+      const nextSnapshot = commitHistory ? {
         bytes: d.bytes,
         annotations: nextAnnots,
         formValues: d.formValues
-      };
+      } : null;
       return {
         ...d,
         annotations: nextAnnots,
         isDirty: true,
-        history: pushHistorySnapshot(d.history, nextSnapshot)
+        history: commitHistory ? pushHistorySnapshot(d.history, nextSnapshot) : d.history
       };
     }));
   }, [activeDoc, activeDocId]);
@@ -496,10 +501,12 @@ export function DocumentProvider({ children }) {
    */
   const deleteAnnotation = useCallback((id) => {
     if (!activeDoc) return;
+    const targetId = id || selectedAnnotationId;
+    if (!targetId) return;
 
     setDocuments(prev => prev.map(d => {
       if (d.id !== activeDocId) return d;
-      const nextAnnots = d.annotations.filter(a => a.id !== id);
+      const nextAnnots = d.annotations.filter(a => a.id !== targetId);
       const nextSnapshot = {
         bytes: d.bytes,
         annotations: nextAnnots,
@@ -513,10 +520,36 @@ export function DocumentProvider({ children }) {
       };
     }));
 
-    if (selectedAnnotationId === id) {
+    if (selectedAnnotationId === targetId) {
       setSelectedAnnotationId(null);
     }
   }, [activeDoc, activeDocId, selectedAnnotationId]);
+
+  /**
+   * Deletes whatever is currently selected (an annotation or selected text on the page).
+   */
+  const deleteSelected = useCallback(() => {
+    if (selectedAnnotationId) {
+      deleteAnnotation(selectedAnnotationId);
+      addToast('Annotation deleted', 'info', 2000);
+      return;
+    }
+    if (selectedTextRange) {
+      addAnnotation({
+        pageIndex: selectedTextRange.pageIndex,
+        type: 'whiteout',
+        x: selectedTextRange.x - 1,
+        y: selectedTextRange.y - 1,
+        width: selectedTextRange.width + 2,
+        height: selectedTextRange.height + 2,
+        color: '#ffffff'
+      });
+      window.getSelection()?.removeAllRanges();
+      setSelectedTextRange(null);
+      addToast('Selected text deleted', 'success', 2500);
+      return;
+    }
+  }, [selectedAnnotationId, selectedTextRange, deleteAnnotation, addAnnotation, addToast]);
 
   /**
    * Sets a form value.
@@ -663,16 +696,36 @@ export function DocumentProvider({ children }) {
           });
         }
       }
-      // Delete key
+      // Delete key or Backspace
       else if (e.key === 'Delete' || e.key === 'Backspace') {
+        const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
         if (selectedAnnotationId) {
+          if (isInput) {
+            if ((e.ctrlKey || e.metaKey || e.shiftKey) || e.target.value === '') {
+              e.preventDefault();
+              deleteAnnotation(selectedAnnotationId);
+              addToast('Annotation deleted', 'info', 2000);
+              return;
+            }
+            return;
+          }
           e.preventDefault();
           deleteAnnotation(selectedAnnotationId);
+          addToast('Annotation deleted', 'info', 2000);
+          return;
+        }
+
+        if (selectedTextRange) {
+          e.preventDefault();
+          deleteSelected();
+          return;
         }
       }
       // Escape
       else if (e.key === 'Escape') {
         setSelectedAnnotationId(null);
+        setSelectedTextRange(null);
+        window.getSelection()?.removeAllRanges();
         setActiveTool('select');
         setIsBottomSheetOpen(false);
       }
@@ -701,7 +754,7 @@ export function DocumentProvider({ children }) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeDoc, activeDocId, deleteAnnotation, loadPdfDocument, redo, saveDocument, selectedAnnotationId, undo, updateAnnotation, commitPendingEdits]);
+  }, [activeDoc, activeDocId, deleteAnnotation, deleteSelected, loadPdfDocument, redo, saveDocument, selectedAnnotationId, selectedTextRange, undo, updateAnnotation, commitPendingEdits]);
 
   return (
     <DocumentContext.Provider
@@ -717,6 +770,9 @@ export function DocumentProvider({ children }) {
         setActiveProperties,
         selectedAnnotationId,
         setSelectedAnnotationId,
+        selectedTextRange,
+        setSelectedTextRange,
+        deleteSelected,
         activeModal,
         setActiveModal,
         modalProps,

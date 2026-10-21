@@ -14,7 +14,8 @@ import {
   Scan,
   Maximize2,
   Search,
-  LayoutGrid
+  LayoutGrid,
+  Trash2
 } from 'lucide-react';
 import { openPdfFiles } from '../../utils/fileUtils';
 
@@ -31,7 +32,10 @@ export default function MobileTopAppBar() {
     createBlankDocument,
     setIsSidebarOpen,
     setSidebarTab,
-    setActiveModal
+    setActiveModal,
+    selectedAnnotationId,
+    selectedTextRange,
+    deleteSelected
   } = useDocument();
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -87,6 +91,15 @@ export default function MobileTopAppBar() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         {activeDoc && (
           <>
+            {(selectedAnnotationId || selectedTextRange) && (
+              <button
+                className="mobile-icon-btn"
+                onClick={deleteSelected}
+                title="Delete Selected Item"
+              >
+                <Trash2 size={18} color="#f43f5e" />
+              </button>
+            )}
             <button
               className="mobile-icon-btn"
               onClick={undo}

@@ -7,8 +7,10 @@ import {
   Eraser,
   Stamp as WatermarkIcon,
   AlignLeft,
-  Crop
+  Crop,
+  Trash2
 } from 'lucide-react';
+import ioAdapter from '../../lib/io';
 
 export default function RibbonTabEdit() {
   const {
@@ -16,34 +18,31 @@ export default function RibbonTabEdit() {
     activeTool,
     setActiveTool,
     setActiveModal,
-    addAnnotation
+    addAnnotation,
+    selectedAnnotationId,
+    selectedTextRange,
+    deleteSelected
   } = useDocument();
 
-  const handleImageUpload = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/png, image/jpeg, image/jpg';
-    input.onchange = async () => {
-      if (input.files && input.files[0]) {
-        const file = input.files[0];
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const dataUrl = e.target.result;
-          addAnnotation({
-            type: 'image',
-            dataUrl,
-            format: file.type.includes('png') ? 'png' : 'jpeg',
-            x: 60,
-            y: 60,
-            width: 200,
-            height: 150
-          });
-          setActiveTool('select');
-        };
-        reader.readAsDataURL(file);
+  const handleImageUpload = async () => {
+    try {
+      const imgs = await ioAdapter.openImages();
+      if (imgs && imgs.length > 0) {
+        const img = imgs[0];
+        addAnnotation({
+          type: 'image',
+          dataUrl: img.dataUrl,
+          format: img.type || 'png',
+          x: 60,
+          y: 60,
+          width: 200,
+          height: 150
+        });
+        setActiveTool('select');
       }
-    };
-    input.click();
+    } catch (e) {
+      console.warn('Image upload notice:', e);
+    }
   };
 
   return (
@@ -87,6 +86,16 @@ export default function RibbonTabEdit() {
             <Eraser size={18} color="#fbbf24" />
             <span>Whiteout</span>
           </button>
+          {(selectedAnnotationId || selectedTextRange) && (
+            <button
+              className="ribbon-btn"
+              onClick={deleteSelected}
+              title="Delete Selected Item (Delete key)"
+            >
+              <Trash2 size={18} color="#f43f5e" />
+              <span>Delete</span>
+            </button>
+          )}
         </div>
         <span className="ribbon-group-title">Edit Objects</span>
       </div>
@@ -98,18 +107,18 @@ export default function RibbonTabEdit() {
             className="ribbon-btn"
             onClick={() => setActiveModal('watermark')}
             disabled={!activeDoc || activeDoc.isEncrypted}
-            title="Add text/image watermark"
+            title="Add watermark"
           >
-            <WatermarkIcon size={18} color="#a78bfa" />
+            <WatermarkIcon size={18} color="#f59e0b" />
             <span>Watermark</span>
           </button>
           <button
             className="ribbon-btn"
             onClick={() => setActiveModal('header-footer')}
             disabled={!activeDoc || activeDoc.isEncrypted}
-            title="Header, Footer & Page Numbers"
+            title="Add headers, footers, and page numbers"
           >
-            <AlignLeft size={18} color="#60a5fa" />
+            <AlignLeft size={18} color="#a855f7" />
             <span>Header/Footer</span>
           </button>
           <button
@@ -118,7 +127,7 @@ export default function RibbonTabEdit() {
             disabled={!activeDoc || activeDoc.isEncrypted}
             title="Crop page margins"
           >
-            <Crop size={18} color="#f472b6" />
+            <Crop size={18} color="#38bdf8" />
             <span>Crop</span>
           </button>
         </div>

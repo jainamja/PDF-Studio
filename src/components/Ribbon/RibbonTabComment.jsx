@@ -22,7 +22,8 @@ export default function RibbonTabComment() {
     stampType,
     setStampType,
     selectedAnnotationId,
-    deleteAnnotation
+    selectedTextRange,
+    deleteSelected
   } = useDocument();
 
   const stampOptions = ['APPROVED', 'DRAFT', 'CONFIDENTIAL', 'VOID', 'FINAL', 'EXPIRED'];
@@ -115,36 +116,33 @@ export default function RibbonTabComment() {
             className={`ribbon-btn ${activeTool === 'ink' ? 'active' : ''}`}
             onClick={() => setActiveTool('ink')}
             disabled={!activeDoc || activeDoc.isEncrypted}
-            title="Freehand Ink"
+            title="Freehand Ink Drawing"
           >
             <PenTool size={18} color="#818cf8" />
-            <span>Draw</span>
+            <span>Ink Pen</span>
           </button>
         </div>
-        <span className="ribbon-group-title">Shapes & Drawing</span>
+        <span className="ribbon-group-title">Drawings</span>
       </div>
 
-      {/* Stamps */}
+      {/* Preset Stamps */}
       <div className="ribbon-group">
-        <div className="ribbon-group-items" style={{ gap: 6 }}>
+        <div className="ribbon-group-items">
           <button
             className={`ribbon-btn ${activeTool === 'stamp' ? 'active' : ''}`}
             onClick={() => setActiveTool('stamp')}
             disabled={!activeDoc || activeDoc.isEncrypted}
-            title="Stamp"
+            title="Place selected stamp"
           >
             <Stamp size={18} color="#34d399" />
             <span>Stamp</span>
           </button>
           <select
+            className="select-field"
             value={stampType}
-            onChange={(e) => {
-              setStampType(e.target.value);
-              setActiveTool('stamp');
-            }}
+            onChange={(e) => setStampType(e.target.value)}
             disabled={!activeDoc || activeDoc.isEncrypted}
-            className="input-field"
-            style={{ fontSize: 11, height: 32 }}
+            style={{ width: 100, height: 26, fontSize: 11, marginTop: 4 }}
           >
             {stampOptions.map(st => (
               <option key={st} value={st}>{st}</option>
@@ -155,13 +153,13 @@ export default function RibbonTabComment() {
       </div>
 
       {/* Actions */}
-      {selectedAnnotationId && (
+      {(selectedAnnotationId || selectedTextRange) && (
         <div className="ribbon-group">
           <div className="ribbon-group-items">
             <button
               className="ribbon-btn"
-              onClick={() => deleteAnnotation(selectedAnnotationId)}
-              title="Delete Selected (Delete key)"
+              onClick={deleteSelected}
+              title="Delete Selected Item (Delete key)"
             >
               <Trash2 size={18} color="#f43f5e" />
               <span>Delete</span>

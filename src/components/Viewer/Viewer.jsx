@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useDocument } from '../../state/DocumentContext';
 import PageView from './PageView';
 import RecentFilesView from '../Common/RecentFilesView';
+import TextSelectionToolbar from './TextSelectionToolbar';
 import { openPdfFiles } from '../../utils/fileUtils';
 
 export default function Viewer() {
@@ -284,6 +285,9 @@ export default function Viewer() {
           scale={calculatedScale}
         />
       ))}
+
+      {/* Floating Toolbar when text is selected */}
+      <TextSelectionToolbar />
     </div>
   );
 }

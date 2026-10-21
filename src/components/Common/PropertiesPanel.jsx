@@ -1,13 +1,14 @@
 import React from 'react';
 import { useDocument } from '../../state/DocumentContext';
-import { X, Bold, Italic } from 'lucide-react';
+import { X, Bold, Italic, Trash2 } from 'lucide-react';
 
 export default function PropertiesPanel() {
   const {
     activeDoc,
     selectedAnnotationId,
     setSelectedAnnotationId,
-    updateAnnotation
+    updateAnnotation,
+    deleteAnnotation
   } = useDocument();
 
   if (!activeDoc || !selectedAnnotationId) return null;
@@ -138,6 +139,18 @@ export default function PropertiesPanel() {
           style={{ width: 90 }}
         />
         <span>{Math.round((ann.opacity !== undefined ? ann.opacity : 1.0) * 100)}%</span>
+      </div>
+
+      {/* Delete Object Action */}
+      <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+        <button
+          className="btn btn-danger"
+          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '6px 12px' }}
+          onClick={() => deleteAnnotation(ann.id)}
+          title="Delete selected object (Delete key)"
+        >
+          <Trash2 size={14} /> Delete Object
+        </button>
       </div>
     </div>
   );

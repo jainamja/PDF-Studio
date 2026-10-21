@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useDocument } from '../../state/DocumentContext';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, Trash2, Copy } from 'lucide-react';
 
 export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
   const {
@@ -30,6 +30,8 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
 
   const pageAnnots = (activeDoc?.annotations || []).filter(a => a.pageIndex === pageIndex);
 
+  const isDrawingTool = ['rectangle', 'ellipse', 'whiteout', 'highlight', 'line', 'arrow', 'ink', 'add-text', 'sticky', 'stamp'].includes(activeTool);
+
   // Convert pointer event to view coordinates (unscaled)
   const getEventViewCoords = (e) => {
     if (!containerRef.current) return { x: 0, y: 0 };
@@ -42,17 +44,15 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
 
   // Pointer Down handler
   const handlePointerDown = (e) => {
-    // Only handle primary button
     if (e.button !== 0) return;
 
-    // Palm rejection: if a pen is currently active and this is touch, reject palm
+    // Palm rejection
     if (e.pointerType === 'pen') {
       activePenIdRef.current = e.pointerId;
     } else if (activePenIdRef.current !== null && e.pointerType === 'touch') {
       return;
     }
 
-    // Allow two-finger gestures to pass through to viewer
     if (e.pointerType === 'touch' && !e.isPrimary) {
       return;
     }
@@ -61,9 +61,55 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
     const pressure = (e.pressure && e.pressure > 0) ? e.pressure : 0.5;
 
     // If a drawing tool is active
-    if (['rectangle', 'ellipse', 'whiteout', 'highlight', 'line', 'arrow', 'ink'].includes(activeTool)) {
+    if (isDrawingTool) {
       e.stopPropagation();
       try { e.target.setPointerCapture(e.pointerId); } catch {}
+
+      if (activeTool === 'add-text') {
+        addAnnotation({
+          pageIndex,
+          type: 'text',
+          text: 'Type text here',
+          x: coords.x,
+          y: coords.y,
+          width: 140,
+          height: 32,
+          fontSize: activeProperties.fontSize || 14,
+          color: activeProperties.color || '#000000',
+          fontFamily: activeProperties.fontFamily || 'Helvetica',
+          isBold: activeProperties.isBold,
+          isItalic: activeProperties.isItalic
+        });
+        setActiveTool('select');
+        return;
+      }
+
+      if (activeTool === 'sticky') {
+        addAnnotation({
+          pageIndex,
+          type: 'sticky',
+          text: 'Note comment',
+          x: coords.x,
+          y: coords.y,
+          author: 'User'
+        });
+        setActiveTool('select');
+        return;
+      }
+
+      if (activeTool === 'stamp') {
+        addAnnotation({
+          pageIndex,
+          type: 'stamp',
+          stampType: stampType || 'APPROVED',
+          x: coords.x,
+          y: coords.y,
+          width: 140,
+          height: 50
+        });
+        setActiveTool('select');
+        return;
+      }
 
       if (activeTool === 'ink') {
         setDrawingState({
@@ -86,55 +132,6 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
       return;
     }
 
-    if (activeTool === 'add-text') {
-      e.stopPropagation();
-      addAnnotation({
-        pageIndex,
-        type: 'text',
-        text: 'Type text here',
-        x: coords.x,
-        y: coords.y,
-        width: 140,
-        height: 32,
-        fontSize: activeProperties.fontSize || 14,
-        color: activeProperties.color || '#000000',
-        fontFamily: activeProperties.fontFamily || 'Helvetica',
-        isBold: activeProperties.isBold,
-        isItalic: activeProperties.isItalic
-      });
-      setActiveTool('select');
-      return;
-    }
-
-    if (activeTool === 'sticky') {
-      e.stopPropagation();
-      addAnnotation({
-        pageIndex,
-        type: 'sticky',
-        text: 'Note comment',
-        x: coords.x,
-        y: coords.y,
-        author: 'User'
-      });
-      setActiveTool('select');
-      return;
-    }
-
-    if (activeTool === 'stamp') {
-      e.stopPropagation();
-      addAnnotation({
-        pageIndex,
-        type: 'stamp',
-        stampType: stampType || 'APPROVED',
-        x: coords.x,
-        y: coords.y,
-        width: 140,
-        height: 50
-      });
-      setActiveTool('select');
-      return;
-    }
-
     // Deselect if clicking blank page
     if (selectedAnnotationId) {
       setSelectedAnnotationId(null);
@@ -143,7 +140,6 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
 
   // Pointer Move
   const handlePointerMove = (e) => {
-    // Palm rejection
     if (activePenIdRef.current !== null && e.pointerType === 'touch') {
       return;
     }
@@ -175,10 +171,11 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
       const dy = coords.y - startMouseY;
 
       if (type === 'move') {
+        // Fast update without cloning history on every single pixel move
         updateAnnotation(annId, {
           x: Math.max(0, startAnn.x + dx),
           y: Math.max(0, startAnn.y + dy)
-        });
+        }, false);
       } else if (type === 'resize') {
         let newX = startAnn.x;
         let newY = startAnn.y;
@@ -198,7 +195,7 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
           newH = h;
         }
 
-        updateAnnotation(annId, { x: newX, y: newY, width: newW, height: newH });
+        updateAnnotation(annId, { x: newX, y: newY, width: newW, height: newH }, false);
       }
     }
   };
@@ -268,6 +265,11 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
     }
 
     if (interactionState) {
+      // Commit final position to history snapshot
+      const ann = (activeDoc?.annotations || []).find(a => a.id === interactionState.annId);
+      if (ann) {
+        updateAnnotation(ann.id, {}, true);
+      }
       setInteractionState(null);
     }
   };
@@ -275,7 +277,7 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
   return (
     <div
       ref={containerRef}
-      className={`annotation-overlay ${activeTool !== 'hand' ? 'interactive' : ''}`}
+      className={`annotation-overlay ${isDrawingTool ? 'interactive' : ''}`}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -283,10 +285,8 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
       style={{
         position: 'absolute',
         inset: 0,
-        pointerEvents: activeTool === 'hand' ? 'none' : 'auto',
-        touchAction: ['rectangle', 'ellipse', 'whiteout', 'highlight', 'line', 'arrow', 'ink'].includes(activeTool)
-          ? 'none'
-          : 'pan-x pan-y'
+        pointerEvents: isDrawingTool ? 'auto' : 'none',
+        touchAction: isDrawingTool ? 'none' : 'pan-x pan-y'
       }}
     >
       {/* Existing Annotations */}
@@ -302,7 +302,8 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
               style={{
                 left: `${ann.x * scale}px`,
                 top: `${ann.y * scale}px`,
-                zIndex: 30
+                zIndex: 30,
+                pointerEvents: 'auto'
               }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -319,14 +320,15 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
                     <span>Note ({ann.author || 'User'})</span>
                     <button
                       onClick={() => deleteAnnotation(ann.id)}
-                      style={{ background: 'none', border: 'none', color: '#f43f5e', cursor: 'pointer' }}
+                      style={{ background: 'none', border: 'none', color: '#f43f5e', cursor: 'pointer', fontWeight: 600 }}
                     >
                       Delete
                     </button>
                   </div>
                   <textarea
                     value={ann.text || ''}
-                    onChange={(e) => updateAnnotation(ann.id, { text: e.target.value })}
+                    onChange={(e) => updateAnnotation(ann.id, { text: e.target.value }, false)}
+                    onBlur={(e) => updateAnnotation(ann.id, { text: e.target.value }, true)}
                     placeholder="Enter comment..."
                   />
                 </div>
@@ -382,7 +384,8 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
           top: `${ann.y * scale}px`,
           width: `${ann.width * scale}px`,
           height: `${ann.height * scale}px`,
-          opacity: ann.opacity !== undefined ? ann.opacity : 1
+          opacity: ann.opacity !== undefined ? ann.opacity : 1,
+          pointerEvents: 'auto'
         };
 
         return (
@@ -410,6 +413,55 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
               }
             }}
           >
+            {/* Floating Action Controls on Selected Annotation */}
+            {isSelected && !interactionState && (
+              <div
+                className="annotation-floating-actions"
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{
+                  position: 'absolute',
+                  bottom: 'calc(100% + 8px)',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: 6,
+                  padding: '2px 4px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                  zIndex: 100,
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                <button
+                  className="btn btn-danger"
+                  style={{ padding: '2px 8px', fontSize: 11, minHeight: 24, display: 'flex', alignItems: 'center', gap: 4 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteAnnotation(ann.id);
+                  }}
+                  title="Delete object (Delete key)"
+                >
+                  <Trash2 size={12} /> Delete
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  style={{ padding: '2px 8px', fontSize: 11, minHeight: 24, display: 'flex', alignItems: 'center', gap: 4 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const copy = { ...ann, id: undefined, x: ann.x + 15, y: ann.y + 15 };
+                    addAnnotation(copy);
+                  }}
+                  title="Duplicate"
+                >
+                  <Copy size={12} /> Duplicate
+                </button>
+              </div>
+            )}
+
             {/* Whiteout */}
             {(ann.type === 'whiteout' || ann.type === 'edit-text-cover') && (
               <div style={{ width: '100%', height: '100%', backgroundColor: ann.color || '#ffffff' }} />
@@ -488,7 +540,8 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
             {['text', 'edit-text'].includes(ann.type) && (
               <textarea
                 value={ann.text || ''}
-                onChange={(e) => updateAnnotation(ann.id, { text: e.target.value })}
+                onChange={(e) => updateAnnotation(ann.id, { text: e.target.value }, false)}
+                onBlur={(e) => updateAnnotation(ann.id, { text: e.target.value }, true)}
                 style={{
                   width: '100%',
                   height: '100%',

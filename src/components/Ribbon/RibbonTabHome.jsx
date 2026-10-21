@@ -13,7 +13,8 @@ import {
   Undo2,
   Redo2,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Trash2
 } from 'lucide-react';
 import { openPdfFiles } from '../../utils/fileUtils';
 
@@ -28,7 +29,10 @@ export default function RibbonTabHome() {
     redo,
     setZoom,
     setPage,
-    commitPendingEdits
+    commitPendingEdits,
+    selectedAnnotationId,
+    selectedTextRange,
+    deleteSelected
   } = useDocument();
 
   const handleOpen = async () => {
@@ -123,6 +127,16 @@ export default function RibbonTabHome() {
             <Hand size={18} />
             <span>Hand</span>
           </button>
+          {(selectedAnnotationId || selectedTextRange) && (
+            <button
+              className="ribbon-btn"
+              onClick={deleteSelected}
+              title="Delete Selected Item (Delete key)"
+            >
+              <Trash2 size={18} color="#f43f5e" />
+              <span>Delete</span>
+            </button>
+          )}
         </div>
         <span className="ribbon-group-title">Tools</span>
       </div>
