@@ -6,8 +6,13 @@ if (typeof window !== 'undefined') {
 }
 
 export function getDocumentOptions(pdfBytes) {
+  // Always clone/slice bytes so pdfjs web worker postMessage([data.buffer]) does not detach caller's ArrayBuffer!
+  const safeData = pdfBytes instanceof Uint8Array
+    ? pdfBytes.slice()
+    : new Uint8Array(pdfBytes).slice();
+
   return {
-    data: pdfBytes,
+    data: safeData,
     cMapUrl: './pdfjs/cmaps/',
     cMapPacked: true,
     standardFontDataUrl: './pdfjs/standard_fonts/',

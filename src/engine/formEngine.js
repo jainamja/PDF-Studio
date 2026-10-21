@@ -17,7 +17,11 @@ import { sanitizeForWinAnsi } from './textSanitizer.js';
  */
 export async function extractFormFields(pdfBytes) {
   try {
-    const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    if (!pdfBytes || (pdfBytes.byteLength !== undefined && pdfBytes.byteLength === 0)) {
+      return { fields: [], hasForm: false };
+    }
+    const safeBytes = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes).slice();
+    const pdfDoc = await PDFDocument.load(safeBytes, { ignoreEncryption: true });
     const form = pdfDoc.getForm();
     const rawFields = form.getFields();
 

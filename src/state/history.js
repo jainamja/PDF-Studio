@@ -15,8 +15,16 @@ export function initHistory(initialSnapshot) {
 
 export function cloneSnapshot(snapshot) {
   if (!snapshot) return null;
+  let bytesClone = null;
+  if (snapshot.bytes) {
+    try {
+      bytesClone = snapshot.bytes.slice ? snapshot.bytes.slice() : new Uint8Array(snapshot.bytes);
+    } catch {
+      bytesClone = null;
+    }
+  }
   return {
-    bytes: snapshot.bytes ? new Uint8Array(snapshot.bytes) : null,
+    bytes: bytesClone,
     annotations: snapshot.annotations ? JSON.parse(JSON.stringify(snapshot.annotations)) : [],
     formValues: snapshot.formValues ? { ...snapshot.formValues } : {}
   };

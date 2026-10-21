@@ -87,11 +87,12 @@ export function DocumentProvider({ children }) {
   const loadPdfDocument = useCallback(async (name, bytes, path = null) => {
     try {
       showBusy('Loading document...');
+      const safeBytes = (bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)).slice();
       let isEncrypted = false;
       let pdfDoc = null;
 
       try {
-        const loadingTask = pdfjsLib.getDocument(getDocumentOptions(bytes));
+        const loadingTask = pdfjsLib.getDocument(getDocumentOptions(safeBytes.slice()));
         pdfDoc = await loadingTask.promise;
       } catch (err) {
         if (err.name === 'PasswordException' || (err.message && err.message.includes('password'))) {
@@ -119,7 +120,7 @@ export function DocumentProvider({ children }) {
       let hasForm = false;
       if (!isEncrypted) {
         try {
-          const formRes = await extractFormFields(bytes);
+          const formRes = await extractFormFields(safeBytes.slice());
           formFields = formRes.fields;
           hasForm = formRes.hasForm;
         } catch (e) {
@@ -127,8 +128,9 @@ export function DocumentProvider({ children }) {
         }
       }
 
+      const docBytes = safeBytes.slice();
       const initialSnapshot = {
-        bytes,
+        bytes: docBytes,
         annotations: [],
         formValues: {}
       };
@@ -137,7 +139,7 @@ export function DocumentProvider({ children }) {
         id: `doc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         name,
         path,
-        bytes,
+        bytes: docBytes,
         pdfDoc,
         pageCount,
         outline,
@@ -204,7 +206,8 @@ export function DocumentProvider({ children }) {
   /**
    * Updates document bytes and reloads pdfjs proxy.
    */
-  const updateDocumentBytes = useCallback(async (docId, newBytes, shouldClearPending = true) => {
+  const updateDocumentBytes = useCallback(async (docId, rawBytes, shouldClearPending = true) => {
+    const newBytes = (rawBytes instanceof Uint8Array ? rawBytes : new Uint8Array(rawBytes)).slice();
     try {
       showBusy('Updating document...');
       const loadingTask = pdfjsLib.getDocument(getDocumentOptions(newBytes));
