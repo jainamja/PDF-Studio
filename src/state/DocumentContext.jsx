@@ -1,5 +1,6 @@
 /**
  * PDF Studio - Document State Context
+ * Shared state across Desktop (Electron), Mobile (Capacitor), and Web/PWA
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
@@ -8,13 +9,81 @@ import pdfjsLib, { getDocumentOptions } from '../utils/pdfjsConfig';
 import { initHistory, pushHistorySnapshot, undoHistory, redoHistory } from './history.js';
 import { commitAnnotations } from '../engine/pdfEngine.js';
 import { extractFormFields, applyFormValues } from '../engine/formEngine.js';
-import { savePdfFile, saveAsPdfFile, openPdfFiles } from '../utils/fileUtils.js';
+import { savePdfFile, saveAsPdfFile, openPdfFiles, sharePdfFile } from '../utils/fileUtils.js';
+import ioAdapter from '../lib/io.js';
 
 const DocumentContext = createContext(null);
 
 export function DocumentProvider({ children }) {
   const [documents, setDocuments] = useState([]);
   const [activeDocId, setActiveDocId] = useState(null);
+
+  // Theme Management (Dark / Light / System)
+  const [theme, setTheme] = useState(() => {
+    return (typeof window !== 'undefined' && localStorage.getItem('pdf_studio_theme')) || 'dark';
+  });
+  const [resolvedTheme, setResolvedTheme] = useState('dark');
+
+  useEffect(() => {
+    const applyTheme = () => {
+      let active = theme;
+      if (theme === 'system') {
+        active = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      setResolvedTheme(active);
+      document.body.className = active === 'light' ? 'light-theme' : 'dark-theme';
+    };
+
+    applyTheme();
+    try {
+      localStorage.setItem('pdf_studio_theme', theme);
+    } catch {}
+
+    if (theme === 'system') {
+      const media = window.matchMedia('(prefers-color-scheme: dark)');
+      const listener = () => applyTheme();
+      media.addEventListener('change', listener);
+      return () => media.removeEventListener('change', listener);
+    }
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+  }, []);
+
+  // Mobile navigation & bottom sheet
+  const [mobileNavTab, setMobileNavTab] = useState('view'); // 'view', 'annotate', 'edit', 'sign', 'pages', 'more'
+  const [isBottomSheetOpen, setIsBottomSheetOpen] = useState(false);
+
+  // Recent files list (persisted in localStorage)
+  const [recentFiles, setRecentFiles] = useState(() => {
+    try {
+      const stored = localStorage.getItem('pdf_studio_recent_files');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const addRecentFile = useCallback((fileInfo) => {
+    setRecentFiles(prev => {
+      const filtered = prev.filter(f => f.name !== fileInfo.name);
+      const updated = [
+        {
+          name: fileInfo.name,
+          path: fileInfo.path || null,
+          pageCount: fileInfo.pageCount || 1,
+          size: fileInfo.size || 0,
+          lastOpened: Date.now()
+        },
+        ...filtered
+      ].slice(0, 10);
+      try {
+        localStorage.setItem('pdf_studio_recent_files', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  }, []);
 
   // Active Tool
   const [activeTool, setActiveTool] = useState('select'); // 'select', 'hand', 'add-text', 'edit-text', 'add-image', 'whiteout', 'highlight', 'underline', 'strikethrough', 'sticky', 'rectangle', 'ellipse', 'line', 'arrow', 'ink', 'stamp'
@@ -37,11 +106,11 @@ export function DocumentProvider({ children }) {
   const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
 
   // Modals & Panels
-  const [activeModal, setActiveModal] = useState(null); // 'watermark', 'header-footer', 'crop', 'metadata', 'compress', 'ocr', 'split', 'merge', 'signature', 'images-to-pdf', 'unsaved-prompt'
+  const [activeModal, setActiveModal] = useState(null); // 'watermark', 'header-footer', 'crop', 'metadata', 'compress', 'ocr', 'split', 'merge', 'signature', 'images-to-pdf', 'unsaved-prompt', 'scan-to-pdf', 'large-file-warning'
   const [modalProps, setModalProps] = useState({});
 
   // Sidebar
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState('thumbnails'); // 'thumbnails', 'outline', 'search', 'comments'
 
   // Search
@@ -84,10 +153,19 @@ export function DocumentProvider({ children }) {
   /**
    * Loads a PDF into memory, extracts pages, forms, and outline.
    */
-  const loadPdfDocument = useCallback(async (name, bytes, path = null) => {
+  const loadPdfDocument = useCallback(async (name, rawBytes, path = null) => {
     try {
       showBusy('Loading document...');
-      const safeBytes = (bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)).slice();
+
+      // Warn before processing PDFs over roughly 100MB
+      const byteLen = rawBytes.byteLength || (rawBytes.length || 0);
+      if (byteLen > 100 * 1024 * 1024) {
+        addToast(`Large document warning: ${(byteLen / 1024 / 1024).toFixed(1)} MB may take a few moments to render on mobile devices`, 'warning', 7000);
+      }
+
+      // Ensure fresh, dedicated Uint8Array with an independent buffer
+      const safeBytes = (rawBytes instanceof Uint8Array ? rawBytes : new Uint8Array(rawBytes)).slice();
+
       let isEncrypted = false;
       let pdfDoc = null;
 
@@ -156,6 +234,14 @@ export function DocumentProvider({ children }) {
 
       setDocuments(prev => [...prev, newDoc]);
       setActiveDocId(newDoc.id);
+
+      addRecentFile({
+        name,
+        path,
+        pageCount,
+        size: safeBytes.length
+      });
+
       hideBusy();
       return newDoc;
     } catch (err) {
@@ -164,7 +250,17 @@ export function DocumentProvider({ children }) {
       console.error(err);
       return null;
     }
-  }, [addToast, hideBusy, showBusy]);
+  }, [addRecentFile, addToast, hideBusy, showBusy]);
+
+  /**
+   * Listen for "Open With" app intents on mobile / Electron file drop
+   */
+  useEffect(() => {
+    const unregister = ioAdapter.registerAppOpenListener(({ name, bytes, path }) => {
+      loadPdfDocument(name, bytes, path);
+    });
+    return () => unregister();
+  }, [loadPdfDocument]);
 
   /**
    * Creates a blank new document (1 blank A4 page)
@@ -207,10 +303,11 @@ export function DocumentProvider({ children }) {
    * Updates document bytes and reloads pdfjs proxy.
    */
   const updateDocumentBytes = useCallback(async (docId, rawBytes, shouldClearPending = true) => {
-    const newBytes = (rawBytes instanceof Uint8Array ? rawBytes : new Uint8Array(rawBytes)).slice();
     try {
       showBusy('Updating document...');
-      const loadingTask = pdfjsLib.getDocument(getDocumentOptions(newBytes));
+      const newBytes = (rawBytes instanceof Uint8Array ? rawBytes : new Uint8Array(rawBytes)).slice();
+
+      const loadingTask = pdfjsLib.getDocument(getDocumentOptions(newBytes.slice()));
       const newPdfDoc = await loadingTask.promise;
       const pageCount = newPdfDoc.numPages;
 
@@ -224,7 +321,7 @@ export function DocumentProvider({ children }) {
       let formFields = [];
       let hasForm = false;
       try {
-        const formRes = await extractFormFields(newBytes);
+        const formRes = await extractFormFields(newBytes.slice());
         formFields = formRes.fields;
         hasForm = formRes.hasForm;
       } catch (e) {
@@ -265,7 +362,7 @@ export function DocumentProvider({ children }) {
   }, [addToast, hideBusy, showBusy]);
 
   /**
-   * Saves the current document.
+   * Saves or shares the current document.
    */
   const saveDocument = useCallback(async (docId = activeDocId, isSaveAs = false) => {
     const doc = documents.find(d => d.id === docId);
@@ -290,7 +387,7 @@ export function DocumentProvider({ children }) {
       if (savedPath) {
         await updateDocumentBytes(docId, burnedBytes, true);
         setDocuments(prev => prev.map(d => d.id === docId ? { ...d, isDirty: false, path: savedPath } : d));
-        addToast(`Document saved successfully`, 'success');
+        addToast(ioAdapter.isCapacitor ? 'Saved & Share Sheet opened' : 'Document saved successfully', 'success');
       }
       hideBusy();
     } catch (err) {
@@ -298,6 +395,24 @@ export function DocumentProvider({ children }) {
       addToast('Save failed: ' + err.message, 'error');
     }
   }, [activeDocId, addToast, commitPendingEdits, documents, hideBusy, showBusy, updateDocumentBytes]);
+
+  /**
+   * Share document via native share sheet
+   */
+  const shareDocument = useCallback(async (docId = activeDocId) => {
+    const doc = documents.find(d => d.id === docId);
+    if (!doc) return;
+
+    try {
+      showBusy('Preparing file to share...');
+      const burnedBytes = await commitPendingEdits(docId);
+      await sharePdfFile(burnedBytes, doc.name, `Share ${doc.name}`);
+      hideBusy();
+    } catch (err) {
+      hideBusy();
+      addToast('Share notice: ' + err.message, 'info');
+    }
+  }, [activeDocId, addToast, commitPendingEdits, documents, hideBusy, showBusy]);
 
   /**
    * Closes a document, prompting if unsaved changes exist.
@@ -501,46 +616,45 @@ export function DocumentProvider({ children }) {
     }));
   }, [activeDocId]);
 
-  // Keyboard Shortcuts
+  // Keyboard Shortcuts (Desktop / Hardware keyboards)
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Avoid intercepting inside inputs/textareas
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
         return;
       }
 
-      // Ctrl+S / Ctrl+Shift+S
-      if (e.ctrlKey && e.key.toLowerCase() === 's') {
+      // Ctrl+S / Cmd+S
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         saveDocument(activeDocId, e.shiftKey);
       }
-      // Ctrl+O
-      else if (e.ctrlKey && e.key.toLowerCase() === 'o') {
+      // Ctrl+O / Cmd+O
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
         e.preventDefault();
         openPdfFiles().then(files => {
           files.forEach(f => loadPdfDocument(f.name, f.bytes, f.path));
         });
       }
-      // Ctrl+Z / Ctrl+Y
-      else if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+      // Ctrl+Z / Cmd+Z
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (e.shiftKey) redo();
         else undo();
-      } else if (e.ctrlKey && e.key.toLowerCase() === 'y') {
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         redo();
       }
-      // Ctrl+F (Find)
-      else if (e.ctrlKey && e.key.toLowerCase() === 'f') {
+      // Ctrl+F / Cmd+F (Find)
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         setIsSidebarOpen(true);
         setSidebarTab('search');
       }
-      // Ctrl+P (Print)
-      else if (e.ctrlKey && e.key.toLowerCase() === 'p') {
+      // Ctrl+P / Cmd+P (Print)
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         if (activeDoc) {
-          commitPendingEdits(activeDoc.id).then(burned => {
+          commitPendingEdits(activeDoc.id).then(() => {
             if (window.electronAPI && window.electronAPI.print) {
               window.electronAPI.print();
             } else {
@@ -560,6 +674,7 @@ export function DocumentProvider({ children }) {
       else if (e.key === 'Escape') {
         setSelectedAnnotationId(null);
         setActiveTool('select');
+        setIsBottomSheetOpen(false);
       }
       // Arrow keys nudging
       else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
@@ -627,6 +742,7 @@ export function DocumentProvider({ children }) {
         loadPdfDocument,
         createBlankDocument,
         saveDocument,
+        shareDocument,
         closeDocument,
         setActiveDoc: setActiveDocId,
         commitPendingEdits,
@@ -638,7 +754,20 @@ export function DocumentProvider({ children }) {
         undo,
         redo,
         setZoom,
-        setPage
+        setPage,
+        // Theme
+        theme,
+        resolvedTheme,
+        setTheme,
+        toggleTheme,
+        // Mobile layout
+        mobileNavTab,
+        setMobileNavTab,
+        isBottomSheetOpen,
+        setIsBottomSheetOpen,
+        // Recent files
+        recentFiles,
+        addRecentFile
       }}
     >
       {children}

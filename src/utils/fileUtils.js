@@ -1,85 +1,25 @@
 /**
  * PDF Studio - File Operations Helper
- * Interacts with Electron ContextBridge (secure) with browser fallbacks.
+ * Routes through the unified platform I/O adapter (src/lib/io.js)
  */
 
+import ioAdapter from '../lib/io.js';
 import JSZip from 'jszip';
 
 export async function openPdfFiles() {
-  if (window.electronAPI && window.electronAPI.openFileDialog) {
-    const result = await window.electronAPI.openFileDialog({
-      multiple: true,
-      filters: [
-        { name: 'PDF Documents', extensions: ['pdf'] },
-        { name: 'All Files', extensions: ['*'] }
-      ]
-    });
-
-    if (result.canceled || !result.files || result.files.length === 0) {
-      return [];
-    }
-
-    return result.files.map(f => ({
-      name: f.name,
-      path: f.path,
-      bytes: new Uint8Array(f.data)
-    }));
-  }
-
-  // Browser fallback
-  return new Promise((resolve) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'application/pdf';
-    input.multiple = true;
-    input.onchange = async () => {
-      const files = Array.from(input.files || []);
-      const loaded = [];
-      for (const file of files) {
-        const buffer = await file.arrayBuffer();
-        loaded.push({
-          name: file.name,
-          path: file.name,
-          bytes: new Uint8Array(buffer)
-        });
-      }
-      resolve(loaded);
-    };
-    input.oncancel = () => resolve([]);
-    input.click();
-  });
+  return await ioAdapter.openPdfs();
 }
 
 export async function savePdfFile(bytes, defaultName = 'document.pdf', existingPath = null) {
-  if (window.electronAPI) {
-    let targetPath = existingPath;
-    if (!targetPath) {
-      const result = await window.electronAPI.saveFileDialog({
-        defaultPath: defaultName,
-        filters: [{ name: 'PDF Document', extensions: ['pdf'] }]
-      });
-      if (result.canceled || !result.filePath) return null;
-      targetPath = result.filePath;
-    }
-
-    const writeRes = await window.electronAPI.writeFile(targetPath, bytes);
-    if (!writeRes.success) throw new Error(writeRes.error);
-    return targetPath;
-  }
-
-  // Browser download fallback
-  const blob = new Blob([bytes], { type: 'application/pdf' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = defaultName;
-  a.click();
-  URL.revokeObjectURL(url);
-  return defaultName;
+  return await ioAdapter.saveBytes(bytes, defaultName, existingPath);
 }
 
 export async function saveAsPdfFile(bytes, defaultName = 'document.pdf') {
-  return await savePdfFile(bytes, defaultName, null);
+  return await ioAdapter.saveBytes(bytes, defaultName, null);
+}
+
+export async function sharePdfFile(bytes, filename = 'document.pdf', title = 'Share PDF') {
+  return await ioAdapter.share({ title, bytes, filename });
 }
 
 export async function selectFolder() {
@@ -99,7 +39,7 @@ export async function writeFilesToFolder(folderPath, files = []) {
     return true;
   }
 
-  // Fallback: zip and download in browser
+  // Fallback: zip and download in browser / mobile
   const zip = new JSZip();
   for (const f of files) {
     zip.file(f.name, f.bytes);

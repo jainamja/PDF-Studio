@@ -1,5 +1,9 @@
 import React, { useEffect } from 'react';
 import { DocumentProvider, useDocument } from './state/DocumentContext';
+import { useDevice } from './hooks/useDevice';
+import ioAdapter from './lib/io';
+
+// Desktop Components
 import TabBar from './components/TabBar/TabBar';
 import Ribbon from './components/Ribbon/Ribbon';
 import Sidebar from './components/Sidebar/Sidebar';
@@ -8,6 +12,13 @@ import StatusBar from './components/Common/StatusBar';
 import PropertiesPanel from './components/Common/PropertiesPanel';
 import BusyOverlay from './components/Common/BusyOverlay';
 import ToastContainer from './components/Common/ToastContainer';
+import RecentFilesView from './components/Common/RecentFilesView';
+
+// Mobile Components
+import MobileTopAppBar from './components/Mobile/MobileTopAppBar';
+import MobileBottomBar from './components/Mobile/MobileBottomBar';
+import MobileBottomSheet from './components/Mobile/MobileBottomSheet';
+import MobileDrawer from './components/Mobile/MobileDrawer';
 
 // Modals
 import SignatureModal from './components/Modals/SignatureModal';
@@ -23,9 +34,11 @@ import OrganizeGridModal from './components/Modals/OrganizeGridModal';
 import ImagesToPdfModal from './components/Modals/ImagesToPdfModal';
 import UnsavedPromptModal from './components/Modals/UnsavedPromptModal';
 import RedactionConfirmModal from './components/Modals/RedactionConfirmModal';
+import ScanModal from './components/Modals/ScanModal';
 
 function AppContent() {
-  const { loadPdfDocument } = useDocument();
+  const { activeDoc, loadPdfDocument } = useDocument();
+  const { isMobile } = useDevice();
 
   // Listen to file drop events from Electron preload if available
   useEffect(() => {
@@ -41,25 +54,55 @@ function AppContent() {
     }
   }, [loadPdfDocument]);
 
+  // Listen to Capacitor open with / share intent
+  useEffect(() => {
+    const unregisterPromise = ioAdapter.registerAppOpenListener(async (file) => {
+      if (file && file.bytes) {
+        await loadPdfDocument(file.name, file.bytes, file.path);
+      }
+    });
+
+    return () => {
+      unregisterPromise.then(unreg => {
+        if (typeof unreg === 'function') unreg();
+      });
+    };
+  }, [loadPdfDocument]);
+
   return (
-    <div className="app-container">
-      {/* Header & Ribbon */}
-      <header className="app-header">
-        <TabBar />
-        <Ribbon />
-      </header>
+    <div className={`app-container ${isMobile ? 'mobile-mode' : 'desktop-mode'}`}>
+      {isMobile ? (
+        <>
+          {/* Mobile Shell */}
+          <MobileTopAppBar />
 
-      {/* Main Workspace */}
-      <main className="workspace-container">
-        <Sidebar />
-        <Viewer />
-        <PropertiesPanel />
-      </main>
+          <main className="workspace-container mobile-workspace" style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+            {activeDoc ? <Viewer /> : <RecentFilesView />}
+          </main>
 
-      {/* Status Bar */}
-      <StatusBar />
+          <MobileBottomBar />
+          <MobileBottomSheet />
+          <MobileDrawer />
+        </>
+      ) : (
+        <>
+          {/* Desktop / Tablet Shell */}
+          <header className="app-header">
+            <TabBar />
+            <Ribbon />
+          </header>
 
-      {/* Modals & Overlays */}
+          <main className="workspace-container">
+            <Sidebar />
+            <Viewer />
+            <PropertiesPanel />
+          </main>
+
+          <StatusBar />
+        </>
+      )}
+
+      {/* Shared Modals & Overlays across all platforms */}
       <SignatureModal />
       <WatermarkModal />
       <HeaderFooterModal />
@@ -73,6 +116,7 @@ function AppContent() {
       <ImagesToPdfModal />
       <UnsavedPromptModal />
       <RedactionConfirmModal />
+      <ScanModal />
 
       <BusyOverlay />
       <ToastContainer />

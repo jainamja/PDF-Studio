@@ -35,6 +35,12 @@ export default function OCRModal() {
       const pdfDoc = await PDFDocument.load(activeDoc.bytes, { ignoreEncryption: true });
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
+      const isMobile = typeof window !== 'undefined' && (
+        window.innerWidth < 800 ||
+        (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+      );
+      const scale = isMobile ? 1.25 : 2.0;
+
       for (let idx = 0; idx < targetPages.length; idx++) {
         const pIdx = targetPages[idx];
         const pageNum = pIdx + 1;
@@ -44,9 +50,8 @@ export default function OCRModal() {
           `OCR: Processing page ${pageNum} (${idx + 1}/${targetPages.length})...`
         );
 
-        // Render page to canvas at 2x scale
+        // Render page to canvas at appropriate scale
         const pdfPage = await activeDoc.pdfDoc.getPage(pageNum);
-        const scale = 2.0;
         const vp = pdfPage.getViewport({ scale });
         const canvas = document.createElement('canvas');
         canvas.width = vp.width;
@@ -65,6 +70,10 @@ export default function OCRModal() {
           }
         });
 
+        // Release canvas memory immediately
+        canvas.width = 0;
+        canvas.height = 0;
+
         // Add invisible text layer onto the pdf-lib page
         const page = pdfDoc.getPage(pIdx);
         const geom = getPageGeometry(page);
@@ -73,7 +82,7 @@ export default function OCRModal() {
           for (const word of result.data.words) {
             if (!word.text || !word.bbox) continue;
 
-            // Convert canvas pixel bbox (at 2x scale) back to view points (at 1x scale)
+            // Convert canvas pixel bbox back to view points
             const viewX = word.bbox.x0 / scale;
             const viewY = word.bbox.y0 / scale;
             const wordH = (word.bbox.y1 - word.bbox.y0) / scale;
@@ -125,20 +134,32 @@ export default function OCRModal() {
         </div>
 
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, background: '#0f172a', padding: 12, borderRadius: 6 }}>
-            <Info size={16} color="#38bdf8" style={{ marginTop: 2, flexShrink: 0 }} />
-            <span style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.4 }}>
-              OCR analyzes scanned pages and images, generating an invisible text layer directly underneath the image. This allows you to select, copy, and search text natively.
+          <div style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+            background: 'rgba(56, 189, 248, 0.1)',
+            border: '1px solid rgba(56, 189, 248, 0.25)',
+            padding: 12,
+            borderRadius: 6,
+            fontSize: 12,
+            color: 'var(--text-main)',
+            lineHeight: 1.4
+          }}>
+            <Info size={16} color="#38bdf8" style={{ flexShrink: 0, marginTop: 2 }} />
+            <span>
+              OCR detects text within scanned images and creates an invisible, searchable text layer directly on top of the original document.
             </span>
           </div>
 
           <div>
-            <label style={{ display: 'block', marginBottom: 4, color: '#cbd5e1', fontSize: 12 }}>Recognition Language</label>
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+              Recognition Language
+            </label>
             <select
+              className="select-field"
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
-              className="input-field"
-              style={{ width: '100%' }}
             >
               <option value="eng">English (eng)</option>
               <option value="spa">Spanish (spa)</option>
@@ -146,25 +167,31 @@ export default function OCRModal() {
               <option value="deu">German (deu)</option>
               <option value="ita">Italian (ita)</option>
               <option value="por">Portuguese (por)</option>
+              <option value="rus">Russian (rus)</option>
+              <option value="hin">Hindi (hin)</option>
+              <option value="chi_sim">Chinese Simplified (chi_sim)</option>
+              <option value="jpn">Japanese (jpn)</option>
             </select>
           </div>
 
           <div>
-            <label style={{ display: 'block', marginBottom: 4, color: '#cbd5e1', fontSize: 12 }}>Page Scope</label>
-            <div style={{ display: 'flex', gap: 14 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+              Page Range
+            </label>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                 <input
                   type="radio"
-                  name="ocrScope"
+                  name="ocrRange"
                   checked={pageRange === 'current'}
                   onChange={() => setPageRange('current')}
                 />
                 Current Page ({activeDoc.currentPage})
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                 <input
                   type="radio"
-                  name="ocrScope"
+                  name="ocrRange"
                   checked={pageRange === 'all'}
                   onChange={() => setPageRange('all')}
                 />
@@ -176,7 +203,9 @@ export default function OCRModal() {
 
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={() => setActiveModal(null)}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleStartOCR}>Run OCR</button>
+          <button className="btn btn-primary" onClick={handleStartOCR}>
+            Start OCR Recognition
+          </button>
         </div>
       </div>
     </div>

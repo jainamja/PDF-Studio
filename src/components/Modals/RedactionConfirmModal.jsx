@@ -40,6 +40,11 @@ export default function RedactionConfirmModal() {
       const burnedDoc = await pdfjsLib.getDocument(getDocumentOptions(burnedPdfBytes)).promise;
 
       const rasterPages = [];
+      const isMobile = typeof window !== 'undefined' && (
+        window.innerWidth < 800 ||
+        (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+      );
+      const rasterScale = isMobile ? 1.25 : 2.0;
 
       for (let idx = 0; idx < affectedPages.length; idx++) {
         const pIdx = affectedPages[idx];
@@ -49,7 +54,7 @@ export default function RedactionConfirmModal() {
         );
 
         const page = await burnedDoc.getPage(pIdx + 1);
-        const vp = page.getViewport({ scale: 2.0 }); // 2x high resolution
+        const vp = page.getViewport({ scale: rasterScale });
         const canvas = document.createElement('canvas');
         canvas.width = vp.width;
         canvas.height = vp.height;
@@ -59,6 +64,10 @@ export default function RedactionConfirmModal() {
 
         const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
         const buf = await blob.arrayBuffer();
+
+        // Release canvas memory immediately
+        canvas.width = 0;
+        canvas.height = 0;
 
         rasterPages.push({
           pageIndex: pIdx,
@@ -98,7 +107,7 @@ export default function RedactionConfirmModal() {
         </div>
 
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <p style={{ fontSize: 13, color: '#f8fafc', lineHeight: 1.5 }}>
+          <p style={{ fontSize: 13, color: 'var(--text-main)', lineHeight: 1.5 }}>
             Are you sure you want to permanently redact content on <strong>{affectedPages.length} page(s)</strong>?
           </p>
 

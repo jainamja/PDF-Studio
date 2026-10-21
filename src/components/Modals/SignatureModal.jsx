@@ -41,7 +41,7 @@ export default function SignatureModal() {
     if (tab === 'draw' && canvasRef.current) {
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 3.0;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.strokeStyle = '#0f172a';
@@ -53,8 +53,11 @@ export default function SignatureModal() {
   const startDrawing = (e) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    try { canvas.setPointerCapture(e.pointerId); } catch {}
+
     const rect = canvas.getBoundingClientRect();
     const ctx = canvas.getContext('2d');
+    ctx.lineWidth = (e.pressure && e.pressure > 0) ? Math.max(2, e.pressure * 5) : 3;
     ctx.beginPath();
     ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
     setIsDrawing(true);
@@ -66,12 +69,18 @@ export default function SignatureModal() {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     const ctx = canvas.getContext('2d');
+    if (e.pressure && e.pressure > 0) {
+      ctx.lineWidth = Math.max(1.8, e.pressure * 5);
+    }
     ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
     ctx.stroke();
   };
 
-  const stopDrawing = () => {
-    setIsDrawing(false);
+  const stopDrawing = (e) => {
+    if (isDrawing && canvasRef.current) {
+      try { canvasRef.current.releasePointerCapture(e.pointerId); } catch {}
+      setIsDrawing(false);
+    }
   };
 
   const clearCanvas = () => {
@@ -98,26 +107,40 @@ export default function SignatureModal() {
     addToast('Signature placed on document', 'success');
   };
 
-  const handleApplyCurrentTab = () => {
-    if (tab === 'draw') {
-      const canvas = canvasRef.current;
-      if (!canvas || !hasDrawn) {
-        addToast('Please draw your signature first', 'warning');
-        return;
-      }
-      handleApplySignature(canvas.toDataURL('image/png'));
-    } else if (tab === 'type') {
-      // Render typed text into canvas
-      const canvas = document.createElement('canvas');
-      canvas.width = 400;
-      canvas.height = 120;
-      const ctx = canvas.getContext('2d');
-      ctx.font = `italic 42px ${typedFont === 'cursive' ? 'Brush Script MT, cursive' : 'Georgia, serif'}`;
-      ctx.fillStyle = '#0f172a';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(typedText, 20, 60);
-      handleApplySignature(canvas.toDataURL('image/png'));
+  const handleApplyDrawn = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !hasDrawn) {
+      addToast('Please draw your signature first', 'warning');
+      return;
     }
+    const dataUrl = canvas.toDataURL('image/png');
+    handleApplySignature(dataUrl);
+  };
+
+  const handleApplyTyped = () => {
+    if (!typedText.trim()) {
+      addToast('Please enter text for your signature', 'warning');
+      return;
+    }
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = 400;
+    tempCanvas.height = 120;
+    const ctx = tempCanvas.getContext('2d');
+
+    ctx.font = typedFont === 'cursive'
+      ? 'italic 36px "Brush Script MT", "Caveat", "Dancing Script", cursive'
+      : typedFont === 'serif'
+      ? 'italic 32px "Times New Roman", serif'
+      : 'bold 30px sans-serif';
+
+    ctx.fillStyle = '#0f172a';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(typedText, 200, 60);
+
+    const dataUrl = tempCanvas.toDataURL('image/png');
+    handleApplySignature(dataUrl);
   };
 
   const handleUploadImage = (e) => {
@@ -146,24 +169,24 @@ export default function SignatureModal() {
 
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {/* Tabs */}
-          <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid #1e293b', paddingBottom: 8 }}>
+          <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8 }}>
             <button
               className={`btn ${tab === 'draw' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ padding: '6px 12px', fontSize: 12 }}
+              style={{ padding: '8px 14px', fontSize: 13 }}
               onClick={() => setTab('draw')}
             >
               <Pen size={14} /> Draw
             </button>
             <button
               className={`btn ${tab === 'type' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ padding: '6px 12px', fontSize: 12 }}
+              style={{ padding: '8px 14px', fontSize: 13 }}
               onClick={() => setTab('type')}
             >
               <Type size={14} /> Type
             </button>
             <button
               className={`btn ${tab === 'upload' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ padding: '6px 12px', fontSize: 12 }}
+              style={{ padding: '8px 14px', fontSize: 13 }}
               onClick={() => setTab('upload')}
             >
               <Upload size={14} /> Upload Image
@@ -173,19 +196,20 @@ export default function SignatureModal() {
           {/* Draw Tab */}
           {tab === 'draw' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ background: '#ffffff', borderRadius: 6, border: '1px solid #334155', overflow: 'hidden' }}>
+              <div style={{ background: '#ffffff', borderRadius: 8, border: '1px solid #334155', overflow: 'hidden' }}>
                 <canvas
                   ref={canvasRef}
                   width={460}
                   height={160}
-                  onMouseDown={startDrawing}
-                  onMouseMove={draw}
-                  onMouseUp={stopDrawing}
-                  onMouseLeave={stopDrawing}
-                  style={{ display: 'block', cursor: 'crosshair', width: '100%', height: 160 }}
+                  onPointerDown={startDrawing}
+                  onPointerMove={draw}
+                  onPointerUp={stopDrawing}
+                  onPointerCancel={stopDrawing}
+                  style={{ display: 'block', cursor: 'crosshair', width: '100%', height: 160, touchAction: 'none' }}
                 />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sign with finger, stylus, or mouse</span>
                 <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: 11 }} onClick={clearCanvas}>
                   Clear
                 </button>
@@ -208,34 +232,46 @@ export default function SignatureModal() {
                 <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12 }}>
                   <input
                     type="radio"
-                    name="sigFont"
+                    name="font"
                     checked={typedFont === 'cursive'}
                     onChange={() => setTypedFont('cursive')}
                   />
-                  Script style
+                  Cursive
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12 }}>
                   <input
                     type="radio"
-                    name="sigFont"
+                    name="font"
                     checked={typedFont === 'serif'}
                     onChange={() => setTypedFont('serif')}
                   />
-                  Classic serif
+                  Elegant Serif
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12 }}>
+                  <input
+                    type="radio"
+                    name="font"
+                    checked={typedFont === 'sans'}
+                    onChange={() => setTypedFont('sans')}
+                  />
+                  Modern Sans
                 </label>
               </div>
+
+              {/* Preview */}
               <div style={{
                 background: '#ffffff',
                 color: '#0f172a',
-                padding: '24px',
+                height: 100,
                 borderRadius: 6,
-                textAlign: 'center',
-                fontFamily: typedFont === 'cursive' ? 'Brush Script MT, cursive' : 'Georgia, serif',
-                fontSize: 34,
-                fontStyle: 'italic',
-                boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)'
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 28,
+                fontFamily: typedFont === 'cursive' ? 'cursive' : typedFont === 'serif' ? 'serif' : 'sans-serif',
+                fontStyle: typedFont !== 'sans' ? 'italic' : 'normal'
               }}>
-                {typedText || 'Signature'}
+                {typedText || 'Signature Preview'}
               </div>
             </div>
           )}
@@ -243,46 +279,51 @@ export default function SignatureModal() {
           {/* Upload Tab */}
           {tab === 'upload' && (
             <div style={{
-              border: '2px dashed #334155',
-              borderRadius: 8,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
               padding: 24,
-              textAlign: 'center',
-              backgroundColor: '#0f172a'
+              border: '2px dashed #334155',
+              borderRadius: 8
             }}>
-              <Upload size={32} color="#6366f1" style={{ marginBottom: 8 }} />
-              <p style={{ color: '#94a3b8', fontSize: 12, marginBottom: 12 }}>
-                Upload an image of your signature (PNG or JPG with transparent/white background)
-              </p>
               <input
                 type="file"
                 accept="image/png, image/jpeg"
+                id="sig-upload"
+                style={{ display: 'none' }}
                 onChange={handleUploadImage}
-                style={{ fontSize: 12 }}
               />
+              <label htmlFor="sig-upload" className="btn btn-primary" style={{ cursor: 'pointer' }}>
+                <Upload size={14} /> Choose Signature Image
+              </label>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+                PNG (with transparent background) or JPEG
+              </span>
             </div>
           )}
 
           {/* Saved Signatures */}
           {savedSignatures.length > 0 && (
             <div style={{ marginTop: 8 }}>
-              <span style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginBottom: 6 }}>
-                Saved Signatures (click to insert):
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                Saved Signatures (Tap to reuse)
               </span>
               <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
-                {savedSignatures.map((sigUrl, idx) => (
+                {savedSignatures.map((sig, idx) => (
                   <div
                     key={idx}
-                    onClick={() => handleApplySignature(sigUrl)}
+                    onClick={() => handleApplySignature(sig)}
                     style={{
-                      background: '#fff',
-                      padding: 4,
+                      background: '#ffffff',
+                      border: '1px solid #334155',
                       borderRadius: 4,
+                      padding: 4,
                       cursor: 'pointer',
-                      border: '1px solid #cbd5e1',
                       flexShrink: 0
                     }}
                   >
-                    <img src={sigUrl} alt="saved sig" style={{ height: 36, display: 'block' }} />
+                    <img src={sig} alt="saved signature" style={{ height: 40, display: 'block' }} />
                   </div>
                 ))}
               </div>
@@ -292,9 +333,14 @@ export default function SignatureModal() {
 
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={() => setActiveModal(null)}>Cancel</button>
-          {tab !== 'upload' && (
-            <button className="btn btn-primary" onClick={handleApplyCurrentTab}>
-              Insert Signature
+          {tab === 'draw' && (
+            <button className="btn btn-primary" onClick={handleApplyDrawn}>
+              Apply Drawn Signature
+            </button>
+          )}
+          {tab === 'type' && (
+            <button className="btn btn-primary" onClick={handleApplyTyped}>
+              Apply Typed Signature
             </button>
           )}
         </div>

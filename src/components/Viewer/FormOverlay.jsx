@@ -44,6 +44,7 @@ export default function FormOverlay({ pageIndex, scale }) {
           return (
             <input
               key={field.id}
+              data-field-name={field.name}
               type="checkbox"
               checked={!!currentVal}
               onChange={(e) => setFormValue(field.name, e.target.checked)}
@@ -60,6 +61,7 @@ export default function FormOverlay({ pageIndex, scale }) {
           return (
             <select
               key={field.id}
+              data-field-name={field.name}
               value={currentVal || ''}
               onChange={(e) => setFormValue(field.name, e.target.value)}
               style={style}
@@ -74,6 +76,7 @@ export default function FormOverlay({ pageIndex, scale }) {
         return (
           <input
             key={field.id}
+            data-field-name={field.name}
             type="text"
             value={currentVal || ''}
             onChange={(e) => setFormValue(field.name, e.target.value)}

@@ -1,9 +1,18 @@
 /**
  * PDF Studio - History Management
  * Maintains undo/redo stacks using snapshots of { bytes, annotations, formValues }
+ * Keeps undo history shallower on mobile (15 snapshots) to conserve memory.
  */
 
-const MAX_HISTORY_LENGTH = 30;
+export function getMaxHistoryLength() {
+  if (typeof window !== 'undefined') {
+    const isMobile = window.innerWidth < 800 ||
+      (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+      (window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
+    if (isMobile) return 15;
+  }
+  return 30;
+}
 
 export function initHistory(initialSnapshot) {
   return {
@@ -30,11 +39,12 @@ export function cloneSnapshot(snapshot) {
   };
 }
 
-export function pushHistorySnapshot(history, newSnapshot) {
+export function pushHistorySnapshot(history, newSnapshot, customLimit) {
   const current = history.present;
   const newPast = current ? [...history.past, current] : [...history.past];
+  const maxLimit = customLimit || getMaxHistoryLength();
 
-  if (newPast.length > MAX_HISTORY_LENGTH) {
+  while (newPast.length > maxLimit) {
     newPast.shift();
   }
 

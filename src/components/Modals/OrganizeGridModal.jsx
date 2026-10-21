@@ -5,22 +5,34 @@ import {
   RotateCw,
   Copy,
   Trash2,
-  ArrowLeft,
-  ArrowRight,
-  Plus
+  FileDown,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import {
   rotatePages,
   deletePages,
   duplicatePages,
   reorderPages,
-  insertBlankPage
+  extractPages
 } from '../../engine/organizeEngine';
+import ioAdapter from '../../lib/io';
 
-function GridThumbnail({ pageIndex, originalIndex, isSelected, onToggleSelect, onDragStart, onDragOver, onDrop }) {
+function GridThumbnail({
+  pageIndex,
+  originalIndex,
+  isSelected,
+  onToggleSelect,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onTouchMovePage
+}) {
   const { activeDoc } = useDocument();
   const canvasRef = useRef(null);
   const [rendered, setRendered] = useState(false);
+  const longPressTimerRef = useRef(null);
+  const [isTouchDragging, setIsTouchDragging] = useState(false);
 
   useEffect(() => {
     if (!activeDoc?.pdfDoc || rendered) return;
@@ -47,6 +59,24 @@ function GridThumbnail({ pageIndex, originalIndex, isSelected, onToggleSelect, o
     return () => { isCancelled = true; };
   }, [activeDoc, originalIndex, rendered]);
 
+  // Touch long press to drag
+  const handleTouchStart = () => {
+    longPressTimerRef.current = setTimeout(() => {
+      setIsTouchDragging(true);
+      if (navigator.vibrate) navigator.vibrate(50);
+    }, 350);
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    if (isTouchDragging) {
+      setIsTouchDragging(false);
+    }
+  };
+
   return (
     <div
       draggable
@@ -54,33 +84,38 @@ function GridThumbnail({ pageIndex, originalIndex, isSelected, onToggleSelect, o
       onDragOver={onDragOver}
       onDrop={(e) => onDrop(e, pageIndex)}
       onClick={onToggleSelect}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
       style={{
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        padding: 8,
-        borderRadius: 8,
-        backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.2)' : '#172033',
-        border: `2px solid ${isSelected ? '#6366f1' : '#1e293b'}`,
+        padding: 10,
+        borderRadius: 10,
+        backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.2)' : 'var(--bg-surface)',
+        border: `2px solid ${isSelected ? 'var(--primary)' : 'var(--border-subtle)'}`,
         cursor: 'grab',
         userSelect: 'none',
         position: 'relative',
-        transition: 'all 0.15s ease'
+        transition: 'all 0.15s ease',
+        transform: isTouchDragging ? 'scale(1.05)' : 'none',
+        boxShadow: isTouchDragging ? '0 10px 20px rgba(0,0,0,0.4)' : 'none'
       }}
     >
       <div style={{
         position: 'absolute',
-        top: 6,
-        left: 6,
-        background: 'rgba(15, 23, 42, 0.8)',
+        top: 8,
+        left: 8,
+        background: 'rgba(15, 23, 42, 0.85)',
         borderRadius: '50%',
-        width: 20,
-        height: 20,
+        width: 22,
+        height: 22,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: 10,
-        fontWeight: 600,
+        fontSize: 11,
+        fontWeight: 700,
         color: '#f8fafc'
       }}>
         {pageIndex + 1}
@@ -91,7 +126,7 @@ function GridThumbnail({ pageIndex, originalIndex, isSelected, onToggleSelect, o
         borderRadius: 4,
         overflow: 'hidden',
         boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
-        marginBottom: 6,
+        marginBottom: 8,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -106,9 +141,9 @@ function GridThumbnail({ pageIndex, originalIndex, isSelected, onToggleSelect, o
           checked={isSelected}
           onChange={onToggleSelect}
           onClick={e => e.stopPropagation()}
-          style={{ cursor: 'pointer', accentColor: '#6366f1' }}
+          style={{ cursor: 'pointer', accentColor: 'var(--primary)', width: 16, height: 16 }}
         />
-        <span style={{ fontSize: 11, color: '#94a3b8' }}>Page {pageIndex + 1}</span>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Page {pageIndex + 1}</span>
       </div>
     </div>
   );
@@ -120,10 +155,10 @@ export default function OrganizeGridModal() {
     activeModal,
     setActiveModal,
     updateDocumentBytes,
+    loadPdfDocument,
     addToast
   } = useDocument();
 
-  // Page ordering state: array of original page indices
   const [pageOrder, setPageOrder] = useState([]);
   const [selectedPages, setSelectedPages] = useState(new Set());
   const [draggedIndex, setDraggedIndex] = useState(null);
@@ -154,15 +189,14 @@ export default function OrganizeGridModal() {
     }
   };
 
-  // Drag and Drop reordering
   const handleDragStart = (e, index) => {
     setDraggedIndex(index);
-    e.dataTransfer.effectAllowed = 'move';
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
   };
 
   const handleDragOver = (e) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
   };
 
   const handleDrop = (e, targetIndex) => {
@@ -176,7 +210,6 @@ export default function OrganizeGridModal() {
     setDraggedIndex(null);
   };
 
-  // Actions
   const handleRotateSelected = async () => {
     if (selectedPages.size === 0) {
       addToast('Please select pages to rotate', 'warning');
@@ -206,6 +239,7 @@ export default function OrganizeGridModal() {
       const newBytes = await deletePages(activeDoc.bytes, targetOriginalIndices);
       await updateDocumentBytes(activeDoc.id, newBytes, false);
       addToast(`Deleted ${selectedPages.size} page(s)`, 'success');
+      setSelectedPages(new Set());
     } catch (e) {
       addToast(e.message, 'error');
     }
@@ -226,8 +260,24 @@ export default function OrganizeGridModal() {
     }
   };
 
+  const handleExtractSelected = async () => {
+    if (selectedPages.size === 0) {
+      addToast('Please select pages to extract', 'warning');
+      return;
+    }
+    try {
+      const targetOriginalIndices = Array.from(selectedPages).map(pos => pageOrder[pos]);
+      const extractedBytes = await extractPages(activeDoc.bytes, targetOriginalIndices);
+      const fileName = `Extracted_${activeDoc.name || 'document.pdf'}`;
+
+      await ioAdapter.saveBytes(extractedBytes, fileName);
+      addToast(`Extracted ${selectedPages.size} page(s) successfully`, 'success');
+    } catch (e) {
+      addToast('Extraction failed: ' + e.message, 'error');
+    }
+  };
+
   const handleSaveOrder = async () => {
-    // Check if order actually changed
     const hasChanged = pageOrder.some((origIdx, pos) => origIdx !== pos);
     if (!hasChanged) {
       setActiveModal(null);
@@ -246,49 +296,56 @@ export default function OrganizeGridModal() {
 
   return (
     <div className="modal-overlay" onClick={() => setActiveModal(null)}>
-      <div className="modal-card" onClick={e => e.stopPropagation()} style={{ maxWidth: 840, height: '80vh' }}>
-        <div className="modal-header">
+      <div className="modal-card" onClick={e => e.stopPropagation()} style={{ maxWidth: 860, height: '85vh', display: 'flex', flexDirection: 'column' }}>
+        <div className="modal-header" style={{ flexWrap: 'wrap', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontWeight: 600 }}>Organize Pages</span>
-            <span style={{ fontSize: 12, color: '#94a3b8' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               {selectedPages.size} of {pageOrder.length} selected
             </span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <button
               className="btn btn-secondary"
-              style={{ padding: '4px 10px', fontSize: 11 }}
+              style={{ padding: '6px 12px', fontSize: 12 }}
               onClick={selectAll}
             >
-              {selectedPages.size === pageOrder.length ? 'Deselect All' : 'Select All'}
+              {selectedPages.size === pageOrder.length ? 'Deselect' : 'Select All'}
             </button>
             <button
               className="btn btn-secondary"
-              style={{ padding: '4px 10px', fontSize: 11 }}
+              style={{ padding: '6px 12px', fontSize: 12 }}
               onClick={handleRotateSelected}
             >
-              <RotateCw size={13} /> Rotate 90°
+              <RotateCw size={14} /> Rotate
             </button>
             <button
               className="btn btn-secondary"
-              style={{ padding: '4px 10px', fontSize: 11 }}
+              style={{ padding: '6px 12px', fontSize: 12 }}
               onClick={handleDuplicateSelected}
             >
-              <Copy size={13} /> Duplicate
+              <Copy size={14} /> Duplicate
+            </button>
+            <button
+              className="btn btn-secondary"
+              style={{ padding: '6px 12px', fontSize: 12 }}
+              onClick={handleExtractSelected}
+            >
+              <FileDown size={14} /> Extract
             </button>
             <button
               className="btn btn-danger"
-              style={{ padding: '4px 10px', fontSize: 11 }}
+              style={{ padding: '6px 12px', fontSize: 12 }}
               onClick={handleDeleteSelected}
             >
-              <Trash2 size={13} /> Delete
+              <Trash2 size={14} /> Delete
             </button>
             <button
               onClick={() => setActiveModal(null)}
-              style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', marginLeft: 8 }}
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6 }}
             >
-              <X size={18} />
+              <X size={20} />
             </button>
           </div>
         </div>

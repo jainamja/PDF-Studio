@@ -31,7 +31,12 @@ export default function CompressModal() {
         compressedBytes = await compressLossless(activeDoc.bytes);
       } else {
         // Lossy raster compression
-        const scale = dpi / 72;
+        const isMobile = typeof window !== 'undefined' && (
+          window.innerWidth < 800 ||
+          (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+        );
+        const effectiveDpi = isMobile ? Math.min(dpi, 100) : dpi;
+        const scale = effectiveDpi / 72;
         const rasterPages = [];
 
         for (let i = 0; i < activeDoc.pageCount; i++) {
@@ -51,6 +56,10 @@ export default function CompressModal() {
 
           const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', quality / 100));
           const buf = await blob.arrayBuffer();
+
+          // Clear canvas memory
+          canvas.width = 0;
+          canvas.height = 0;
 
           rasterPages.push({
             pageIndex: i,
@@ -118,15 +127,15 @@ export default function CompressModal() {
           </div>
 
           {mode === 'lossless' ? (
-            <div style={{ fontSize: 12, color: '#94a3b8', background: '#0f172a', padding: 12, borderRadius: 6, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg-app)', padding: 12, borderRadius: 6, lineHeight: 1.5 }}>
               Removes duplicate resources, compresses object streams, and reorganizes document structure without any quality loss.
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}>
-                  <span style={{ color: '#cbd5e1' }}>Resolution: {dpi} DPI</span>
-                  <span style={{ color: '#94a3b8' }}>{dpi < 100 ? 'Low' : dpi < 150 ? 'Standard' : 'High'}</span>
+                  <span style={{ color: 'var(--text-main)' }}>Resolution: {dpi} DPI</span>
+                  <span style={{ color: 'var(--text-muted)' }}>{dpi < 100 ? 'Low' : dpi < 150 ? 'Standard' : 'High'}</span>
                 </div>
                 <input
                   type="range"
@@ -141,8 +150,8 @@ export default function CompressModal() {
 
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 12 }}>
-                  <span style={{ color: '#cbd5e1' }}>JPEG Quality: {quality}%</span>
-                  <span style={{ color: '#94a3b8' }}>{quality < 50 ? 'Smallest Size' : 'Balanced'}</span>
+                  <span style={{ color: 'var(--text-main)' }}>JPEG Quality: {quality}%</span>
+                  <span style={{ color: 'var(--text-muted)' }}>{quality < 50 ? 'Smallest Size' : 'Balanced'}</span>
                 </div>
                 <input
                   type="range"

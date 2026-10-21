@@ -4,6 +4,8 @@ import TextLayerOverlay from './TextLayerOverlay';
 import AnnotationOverlay from './AnnotationOverlay';
 import FormOverlay from './FormOverlay';
 
+const MAX_CANVAS_PIXELS = 8_000_000; // 8M px mobile safety limit
+
 export default function PageView({ pageIndex, docId, scale }) {
   const { activeDoc, activeTool, setActiveTool, addAnnotation } = useDocument();
 
@@ -16,6 +18,10 @@ export default function PageView({ pageIndex, docId, scale }) {
   const [isVisible, setIsVisible] = useState(false);
   const [isRendered, setIsRendered] = useState(false);
 
+  // Check if page is active or direct neighbour (currentPage ± 1)
+  const isNearCurrentPage = Math.abs((pageIndex + 1) - (activeDoc?.currentPage || 1)) <= 1;
+  const shouldBeActive = isVisible || isNearCurrentPage;
+
   // IntersectionObserver for lazy page rendering
   useEffect(() => {
     const el = containerRef.current;
@@ -24,23 +30,29 @@ export default function PageView({ pageIndex, docId, scale }) {
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            setIsVisible(true);
-          } else {
-            // Keep rendered page dimensions but can offload memory if far
-          }
+          setIsVisible(entry.isIntersecting);
         });
       },
-      { rootMargin: '400px 0px 400px 0px' }
+      { rootMargin: '300px 0px 300px 0px' }
     );
 
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
-  // Fetch page proxy from pdfjs
+  // Fetch page proxy from pdfjs when in range
   useEffect(() => {
-    if (!activeDoc || !activeDoc.pdfDoc || !isVisible) return;
+    if (!activeDoc || !activeDoc.pdfDoc || !shouldBeActive) {
+      // Offload memory for pages far off-screen
+      if (!shouldBeActive) {
+        if (canvasRef.current) {
+          canvasRef.current.width = 0;
+          canvasRef.current.height = 0;
+        }
+        setIsRendered(false);
+      }
+      return;
+    }
 
     let isCancelled = false;
     activeDoc.pdfDoc.getPage(pageIndex + 1).then(page => {
@@ -55,17 +67,25 @@ export default function PageView({ pageIndex, docId, scale }) {
     return () => {
       isCancelled = true;
     };
-  }, [activeDoc, isVisible, pageIndex, scale]);
+  }, [activeDoc, shouldBeActive, pageIndex, scale]);
 
-  // Render Page to Canvas
+  // Render Page to Canvas with pixel and DPR caps
   useEffect(() => {
-    if (!pdfPage || !viewport || !isVisible) return;
+    if (!pdfPage || !viewport || !shouldBeActive) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
+
+    // Cap devicePixelRatio at 2 on mobile/high-DPI screens
+    let dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    // Enforce 8M px safety cap
+    const rawPixels = (viewport.width * dpr) * (viewport.height * dpr);
+    if (rawPixels > MAX_CANVAS_PIXELS) {
+      dpr = Math.sqrt(MAX_CANVAS_PIXELS / (viewport.width * viewport.height));
+    }
 
     canvas.width = Math.floor(viewport.width * dpr);
     canvas.height = Math.floor(viewport.height * dpr);
@@ -98,7 +118,7 @@ export default function PageView({ pageIndex, docId, scale }) {
         renderTaskRef.current.cancel();
       }
     };
-  }, [pdfPage, viewport, isVisible]);
+  }, [pdfPage, viewport, shouldBeActive]);
 
   // Text selection handler
   const handleTextSelect = ({ text, x, y, width, height }) => {
@@ -116,7 +136,6 @@ export default function PageView({ pageIndex, docId, scale }) {
       });
       setActiveTool('select');
     } else if (activeTool === 'edit-text') {
-      // Cover the original text line and replace it with editable text
       addAnnotation({
         pageIndex,
         type: 'edit-text',

@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { useDocument } from '../../state/DocumentContext';
-import { MessageSquare, CheckCircle, AlertTriangle, ShieldAlert, XCircle, Award } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 
 export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
   const {
@@ -25,9 +25,12 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
   // Open sticky note popups
   const [openStickyId, setOpenStickyId] = useState(null);
 
+  // Palm rejection: track active pen pointer id
+  const activePenIdRef = useRef(null);
+
   const pageAnnots = (activeDoc?.annotations || []).filter(a => a.pageIndex === pageIndex);
 
-  // Convert mouse event to view coordinates (unscaled)
+  // Convert pointer event to view coordinates (unscaled)
   const getEventViewCoords = (e) => {
     if (!containerRef.current) return { x: 0, y: 0 };
     const rect = containerRef.current.getBoundingClientRect();
@@ -37,25 +40,43 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
     };
   };
 
-  // Mouse Down handler for drawing new annotations or deselecting
-  const handleMouseDown = (e) => {
-    if (e.button !== 0) return; // Left click only
+  // Pointer Down handler
+  const handlePointerDown = (e) => {
+    // Only handle primary button
+    if (e.button !== 0) return;
+
+    // Palm rejection: if a pen is currently active and this is touch, reject palm
+    if (e.pointerType === 'pen') {
+      activePenIdRef.current = e.pointerId;
+    } else if (activePenIdRef.current !== null && e.pointerType === 'touch') {
+      return;
+    }
+
+    // Allow two-finger gestures to pass through to viewer
+    if (e.pointerType === 'touch' && !e.isPrimary) {
+      return;
+    }
 
     const coords = getEventViewCoords(e);
+    const pressure = (e.pressure && e.pressure > 0) ? e.pressure : 0.5;
 
     // If a drawing tool is active
     if (['rectangle', 'ellipse', 'whiteout', 'highlight', 'line', 'arrow', 'ink'].includes(activeTool)) {
       e.stopPropagation();
+      try { e.target.setPointerCapture(e.pointerId); } catch {}
+
       if (activeTool === 'ink') {
         setDrawingState({
           type: 'ink',
-          points: [coords],
+          pointerId: e.pointerId,
+          points: [{ ...coords, pressure }],
           startX: coords.x,
           startY: coords.y
         });
       } else {
         setDrawingState({
           type: activeTool,
+          pointerId: e.pointerId,
           startX: coords.x,
           startY: coords.y,
           currentX: coords.x,
@@ -120,16 +141,22 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
     }
   };
 
-  // Mouse Move
-  const handleMouseMove = (e) => {
+  // Pointer Move
+  const handlePointerMove = (e) => {
+    // Palm rejection
+    if (activePenIdRef.current !== null && e.pointerType === 'touch') {
+      return;
+    }
+
     const coords = getEventViewCoords(e);
+    const pressure = (e.pressure && e.pressure > 0) ? e.pressure : 0.5;
 
     if (drawingState) {
       e.stopPropagation();
       if (drawingState.type === 'ink') {
         setDrawingState(prev => ({
           ...prev,
-          points: [...prev.points, coords]
+          points: [...prev.points, { ...coords, pressure }]
         }));
       } else {
         setDrawingState(prev => ({
@@ -176,10 +203,16 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
     }
   };
 
-  // Mouse Up
-  const handleMouseUp = (e) => {
+  // Pointer Up / Cancel
+  const handlePointerUp = (e) => {
+    if (activePenIdRef.current === e.pointerId) {
+      activePenIdRef.current = null;
+    }
+
     if (drawingState) {
       e.stopPropagation();
+      try { e.target.releasePointerCapture(e.pointerId); } catch {}
+
       const coords = getEventViewCoords(e);
 
       if (drawingState.type === 'ink') {
@@ -243,13 +276,17 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
     <div
       ref={containerRef}
       className={`annotation-overlay ${activeTool !== 'hand' ? 'interactive' : ''}`}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
       style={{
         position: 'absolute',
         inset: 0,
-        pointerEvents: activeTool === 'hand' ? 'none' : 'auto'
+        pointerEvents: activeTool === 'hand' ? 'none' : 'auto',
+        touchAction: ['rectangle', 'ellipse', 'whiteout', 'highlight', 'line', 'arrow', 'ink'].includes(activeTool)
+          ? 'none'
+          : 'pan-x pan-y'
       }}
     >
       {/* Existing Annotations */}
@@ -357,7 +394,7 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
               e.stopPropagation();
               setSelectedAnnotationId(ann.id);
             }}
-            onMouseDown={(e) => {
+            onPointerDown={(e) => {
               if (activeTool === 'select' && e.button === 0) {
                 e.stopPropagation();
                 setSelectedAnnotationId(ann.id);
@@ -369,6 +406,7 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
                   startMouseY: coords.y,
                   startAnn: { ...ann }
                 });
+                try { e.target.setPointerCapture(e.pointerId); } catch {}
               }
             }}
           >
@@ -470,14 +508,14 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
               />
             )}
 
-            {/* Resize Handles when selected */}
+            {/* Resize Handles when selected (minimum 28px hit target on touch) */}
             {isSelected && (
               <>
                 {['nw', 'ne', 'se', 'sw', 'n', 's', 'e', 'w'].map(handle => (
                   <div
                     key={handle}
                     className={`resize-handle ${handle}`}
-                    onMouseDown={(e) => {
+                    onPointerDown={(e) => {
                       e.stopPropagation();
                       const coords = getEventViewCoords(e);
                       setInteractionState({
@@ -488,6 +526,7 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
                         startMouseY: coords.y,
                         startAnn: { ...ann }
                       });
+                      try { e.target.setPointerCapture(e.pointerId); } catch {}
                     }}
                   />
                 ))}
@@ -497,7 +536,7 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
         );
       })}
 
-      {/* Live Drawing Preview */}
+      {/* Live Drawing Preview with pressure support */}
       {drawingState && (
         <>
           {drawingState.type === 'ink' && drawingState.points.length > 1 && (
@@ -505,7 +544,9 @@ export default function AnnotationOverlay({ pageIndex, scale, viewport }) {
               <path
                 d={drawingState.points.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${p.x * scale} ${p.y * scale}`, '')}
                 stroke={activeProperties.strokeColor || '#2563eb'}
-                strokeWidth={(activeProperties.strokeWidth || 2) * scale}
+                strokeWidth={(activeProperties.strokeWidth || 2) * scale * (drawingState.points[drawingState.points.length - 1].pressure ? Math.max(0.6, drawingState.points[drawingState.points.length - 1].pressure * 1.5) : 1)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
                 fill="none"
               />
             </svg>
